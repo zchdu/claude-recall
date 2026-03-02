@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="128" y1="128" x2="384" y2="384" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E0E7FF"/>
+      <stop offset="100%" stop-color="#C7D2FE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- Circular recall arrow (outer) -->
+  <path d="M256 112
+    A144 144 0 1 1 148 188"
+    stroke="url(#arrow)" stroke-width="32" stroke-linecap="round" fill="none"/>
+
+  <!-- Arrow head -->
+  <polygon points="148,148 148,228 108,188" fill="#E0E7FF"/>
+
+  <!-- Three dots representing patterns being discovered -->
+  <circle cx="220" cy="256" r="20" fill="#FDE68A" opacity="0.95"/>
+  <circle cx="292" cy="256" r="20" fill="#FDE68A" opacity="0.95"/>
+  <circle cx="256" cy="326" r="20" fill="#A5F3FC" opacity="0.95"/>
+
+  <!-- Connecting lines between dots (pattern/constellation) -->
+  <line x1="220" y1="256" x2="292" y2="256" stroke="#FDE68A" stroke-width="4" opacity="0.5"/>
+  <line x1="220" y1="256" x2="256" y2="326" stroke="#FDE68A" stroke-width="4" opacity="0.4"/>
+  <line x1="292" y1="256" x2="256" y2="326" stroke="#A5F3FC" stroke-width="4" opacity="0.4"/>
+</svg>
