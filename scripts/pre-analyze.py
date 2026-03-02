@@ -157,11 +157,11 @@ def main():
                 bash_cmds[cmd] += 1
                 key = cmd[:80]
         elif tool in ("Edit", "Write", "Read"):
-            key = f"{tool}:{str(inp.get('file_path', ''))[:60]}"
+            key = str(inp.get("file_path", ""))[:60]
         elif tool == "Glob":
-            key = f"Glob:{str(inp.get('pattern', ''))[:60]}"
+            key = str(inp.get("pattern", ""))[:60]
         elif tool == "Grep":
-            key = f"Grep:{str(inp.get('pattern', ''))[:60]}"
+            key = str(inp.get("pattern", ""))[:60]
 
         session_tools[sid].append((tool, key))
         if tool == "Bash" and key:
@@ -214,7 +214,8 @@ def main():
         for n in (2, 3):
             for i in range(len(seq) - n + 1):
                 gram = tuple(seq[i:i + n])
-                if any(t in ("Bash", "Edit", "Write") for t, _ in gram):
+                # Must contain at least one Bash; pure Edit/Read sequences are too generic
+                if any(t == "Bash" for t, _ in gram):
                     ngram_sids[gram].add(sid)
 
     repeated_ngrams = {g: s for g, s in ngram_sids.items() if len(s) >= min_sess}
