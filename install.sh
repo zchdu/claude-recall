@@ -139,18 +139,11 @@ install_file "$SCRIPT_DIR/scripts/pre-analyze.py" "$SCRIPTS_DIR/pre-analyze.py" 
 # --- 3. Install skill (new format) ---
 install_file "$SCRIPT_DIR/skills/analyze-patterns/SKILL.md" "$SKILLS_DIR/analyze-patterns/SKILL.md" "Skill (analyze-patterns)"
 
-# --- 4. Install legacy command ---
-mkdir -p "$COMMANDS_DIR"
-SRC_CMD="$SCRIPT_DIR/commands/analyze-patterns.md"
+# --- 4. Clean up legacy command (replaced by skills/ format) ---
 DST_CMD="$COMMANDS_DIR/analyze-patterns.md"
-
-if [ -f "$SRC_CMD" ]; then
-    if [ -f "$DST_CMD" ] && [ "$FORCE" -eq 0 ]; then
-        skip "Legacy command already exists: $DST_CMD"
-    else
-        cp "$SRC_CMD" "$DST_CMD"
-        ok "Legacy command installed: $DST_CMD"
-    fi
+if [ -f "$DST_CMD" ]; then
+    rm "$DST_CMD"
+    ok "Removed legacy command (replaced by skill): $DST_CMD"
 fi
 
 # --- 5. Register hook in settings.json ---
