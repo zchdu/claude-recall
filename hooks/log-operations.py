@@ -6,6 +6,11 @@ JSONL log file.  Large values (file contents, diffs) are truncated to keep
 logs compact.  The log auto-rotates when it exceeds 10 MB (keeps the newer
 half).
 
+v2 additions (backward-compatible):
+  - ver: format version (2)
+  - tuid: tool_use_id (truncated to 20 chars)
+  - res: tool_response summary (success/error/key fields, max 500 chars)
+
 Safety: This script is invoked by Claude Code after every tool call.  Any
 unhandled exception would surface as a hook error, so the entire main() body
 is wrapped in a blanket try/except that silently swallows all failures --
@@ -15,14 +20,6 @@ Concurrency: Multiple Claude Code sessions may run in parallel and append to
 the same JSONL file.  We use fcntl.flock (advisory lock) on a separate lock
 file to serialise writes and rotation, preventing interleaved lines or
 partial truncation.
-
-Testing notes (unit-test sketch, not implemented here):
-  - truncate_value: verify strings > MAX_STR_LEN are shortened; dicts and
-    lists are recursed/capped; short values pass through unchanged.
-  - maybe_rotate: create a file > MAX_SIZE, call maybe_rotate, assert the
-    file shrank and starts with a complete JSON line.
-  - main (integration): pipe a sample event JSON to stdin, assert a valid
-    JSONL line was appended to the log file.
 """
 
 import json
@@ -35,6 +32,7 @@ LOG_PATH = os.path.join(LOG_DIR, "operations.jsonl")
 LOCK_PATH = os.path.join(LOG_DIR, ".operations.lock")
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_STR_LEN = 300
+MAX_RES_LEN = 500
 
 # fcntl is only available on Unix; fall back to no-op on Windows.
 try:
@@ -62,6 +60,58 @@ def truncate_value(v):
     if isinstance(v, list) and len(v) > 20:
         return v[:10] + [f"...({len(v)} items)"]
     return v
+
+
+def _summarize_response(tool_response):
+    """Extract key fields from tool_response, truncate to MAX_RES_LEN.
+
+    Keeps: success/error/exit_code/filePath/stderr (first line).
+    Drops: large content/output blobs.
+    """
+    if not isinstance(tool_response, dict):
+        if isinstance(tool_response, str):
+            s = tool_response[:MAX_RES_LEN]
+            return {"text": s} if s else {}
+        return {}
+
+    summary = {}
+
+    # Boolean/numeric fields — always keep
+    for key in ("success", "exit_code", "exitCode"):
+        if key in tool_response:
+            summary[key] = tool_response[key]
+
+    # Short string fields — keep truncated
+    for key in ("filePath", "file_path", "error", "message"):
+        val = tool_response.get(key)
+        if isinstance(val, str) and val:
+            summary[key] = val[:200]
+
+    # stderr first line
+    stderr = tool_response.get("stderr", "")
+    if isinstance(stderr, str) and stderr.strip():
+        first_line = stderr.strip().split("\n")[0][:200]
+        summary["stderr"] = first_line
+
+    # stdout/output — just length hint
+    for key in ("stdout", "output", "content"):
+        val = tool_response.get(key)
+        if isinstance(val, str) and len(val) > 100:
+            summary[key + "_len"] = len(val)
+        elif isinstance(val, str) and val:
+            summary[key] = val
+
+    # Ensure total JSON length stays within MAX_RES_LEN
+    serialized = json.dumps(summary, ensure_ascii=False)
+    if len(serialized) > MAX_RES_LEN:
+        # Keep only the most important fields
+        keep = {}
+        for key in ("success", "exit_code", "exitCode", "error", "stderr"):
+            if key in summary:
+                keep[key] = summary[key]
+        summary = keep
+
+    return summary
 
 
 def maybe_rotate():
@@ -108,12 +158,25 @@ def _main_inner():
     if not isinstance(session_id, str):
         session_id = str(session_id)
 
+    # v2: extract tool_use_id
+    tuid = data.get("tool_use_id", "")
+    if not isinstance(tuid, str):
+        tuid = str(tuid) if tuid else ""
+    tuid = tuid[:20]
+
+    # v2: summarize tool_response
+    tool_response = data.get("tool_response", {})
+    res = _summarize_response(tool_response)
+
     entry = {
+        "ver": 2,
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sid": session_id[:16],
         "tool": data.get("tool_name", ""),
         "input": summary,
         "cwd": data.get("cwd", ""),
+        "tuid": tuid,
+        "res": res,
     }
 
     line = json.dumps(entry, ensure_ascii=False) + "\n"

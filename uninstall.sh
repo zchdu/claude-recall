@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # uninstall.sh - Uninstall Claude Recall
-# Removes hook script, skill, and deregisters the PostToolUse hook.
+# Removes hook, script, skills, and deregisters the PostToolUse hook.
 # Optionally removes collected log data.
 set -euo pipefail
 
@@ -35,10 +35,11 @@ Options:
 
 What it does:
   1. Removes ~/.claude/hooks/log-operations.py
-  2. Removes ~/.claude/commands/analyze-patterns.md
-  3. Removes the log-operations hook entry from ~/.claude/settings.json
-     (preserves all other settings and hooks)
-  4. Optionally removes ~/.claude/tool_logs/ (with --remove-logs or interactive prompt)
+  2. Removes ~/.claude/scripts/pre-analyze.py
+  3. Removes ~/.claude/skills/analyze-patterns/
+  4. Removes ~/.claude/commands/analyze-patterns.md
+  5. Removes the log-operations hook entry from ~/.claude/settings.json
+  6. Optionally removes ~/.claude/tool_logs/ (with --remove-logs or interactive prompt)
 EOF
     exit 0
 }
@@ -63,6 +64,8 @@ done
 CLAUDE_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 COMMANDS_DIR="$CLAUDE_DIR/commands"
+SKILLS_DIR="$CLAUDE_DIR/skills"
+SCRIPTS_DIR="$CLAUDE_DIR/scripts"
 SETTINGS="$CLAUDE_DIR/settings.json"
 LOGS_DIR="$CLAUDE_DIR/tool_logs"
 
@@ -72,7 +75,7 @@ echo ""
 
 # --- Confirm ---
 if [ "$AUTO_YES" -eq 0 ]; then
-    printf "This will remove Claude Recall hook and command. Continue? [y/N] "
+    printf "This will remove Claude Recall hook, script, and skills. Continue? [y/N] "
     read -r REPLY
     case "$REPLY" in
         [yY]|[yY][eE][sS]) ;;
@@ -84,37 +87,53 @@ if [ "$AUTO_YES" -eq 0 ]; then
     echo ""
 fi
 
-# --- 1. Remove hook script ---
+# --- Helper ---
+clean_empty_dir() {
+    local path="$1"
+    if [ -d "$path" ] && [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+        rmdir "$path"
+        ok "Removed empty directory: $path"
+    fi
+}
+
+# --- 1. Remove hook ---
 if [ -f "$HOOKS_DIR/log-operations.py" ]; then
     rm "$HOOKS_DIR/log-operations.py"
     ok "Removed hook: $HOOKS_DIR/log-operations.py"
 else
     skip "Hook not found: $HOOKS_DIR/log-operations.py"
 fi
+clean_empty_dir "$HOOKS_DIR"
 
-# Clean up empty hooks directory
-if [ -d "$HOOKS_DIR" ] && [ -z "$(ls -A "$HOOKS_DIR" 2>/dev/null)" ]; then
-    rmdir "$HOOKS_DIR"
-    ok "Removed empty directory: $HOOKS_DIR"
+# --- 2. Remove pre-analyzer ---
+if [ -f "$SCRIPTS_DIR/pre-analyze.py" ]; then
+    rm "$SCRIPTS_DIR/pre-analyze.py"
+    ok "Removed script: $SCRIPTS_DIR/pre-analyze.py"
+else
+    skip "Script not found: $SCRIPTS_DIR/pre-analyze.py"
 fi
+clean_empty_dir "$SCRIPTS_DIR"
 
-# --- 2. Remove skill ---
+# --- 3. Remove skill ---
+if [ -d "$SKILLS_DIR/analyze-patterns" ]; then
+    rm -rf "$SKILLS_DIR/analyze-patterns"
+    ok "Removed skill: $SKILLS_DIR/analyze-patterns/"
+else
+    skip "Skill not found: $SKILLS_DIR/analyze-patterns/"
+fi
+clean_empty_dir "$SKILLS_DIR"
+
+# --- 4. Remove legacy command ---
 if [ -f "$COMMANDS_DIR/analyze-patterns.md" ]; then
     rm "$COMMANDS_DIR/analyze-patterns.md"
     ok "Removed command: $COMMANDS_DIR/analyze-patterns.md"
 else
     skip "Command not found: $COMMANDS_DIR/analyze-patterns.md"
 fi
+clean_empty_dir "$COMMANDS_DIR"
 
-# Clean up empty commands directory
-if [ -d "$COMMANDS_DIR" ] && [ -z "$(ls -A "$COMMANDS_DIR" 2>/dev/null)" ]; then
-    rmdir "$COMMANDS_DIR"
-    ok "Removed empty directory: $COMMANDS_DIR"
-fi
-
-# --- 3. Remove hook from settings.json ---
+# --- 5. Remove hook from settings.json ---
 if [ -f "$SETTINGS" ]; then
-    # Check Python 3 availability
     if ! command -v python3 >/dev/null 2>&1; then
         err "Python 3 not found. Cannot safely edit $SETTINGS"
         err "Please manually remove the 'log-operations' hook entry from $SETTINGS"
@@ -145,7 +164,6 @@ for event_type in list(hooks.keys()):
         continue
     filtered = []
     for entry in entries:
-        # Check if this entry contains our hook
         entry_str = json.dumps(entry)
         if hook_marker in entry_str:
             modified = True
@@ -154,10 +172,8 @@ for event_type in list(hooks.keys()):
     if filtered:
         hooks[event_type] = filtered
     else:
-        # Remove empty event type
         del hooks[event_type]
 
-# Remove empty hooks section
 if not hooks and 'hooks' in data:
     del data['hooks']
 
@@ -193,13 +209,12 @@ else
     skip "Settings file not found: $SETTINGS"
 fi
 
-# --- 4. Optionally remove log data ---
+# --- 6. Optionally remove log data ---
 if [ -d "$LOGS_DIR" ]; then
     if [ "$REMOVE_LOGS" -eq 1 ]; then
         rm -rf "$LOGS_DIR"
         ok "Removed log directory: $LOGS_DIR"
     elif [ "$AUTO_YES" -eq 0 ]; then
-        # Show log size for context
         LOG_SIZE="unknown"
         if command -v du >/dev/null 2>&1; then
             LOG_SIZE="$(du -sh "$LOGS_DIR" 2>/dev/null | cut -f1)"

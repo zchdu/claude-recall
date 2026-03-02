@@ -30,21 +30,22 @@ You use Claude Code every day. You deploy the same way, debug the same way, rest
  After a few sessions, you run /analyze-patterns
           │
           ▼
- Claude reads the logs, finds repeated multi-step workflows
+ Python pre-analyzer crunches logs → Claude reads the summary (not raw logs)
           │
           ▼
  You pick which patterns to save as /skills
           │
           ▼
- New skills are written to ~/.claude/commands/ — ready to use
+ New skills are written to ~/.claude/ — ready to use
 ```
 
-**Two components, zero friction:**
+**Three components, zero friction:**
 
 | Component | What it does |
 |-----------|-------------|
-| `log-operations.py` | **PostToolUse hook** — silently appends a one-line JSON summary after every tool call. Truncates large values, auto-rotates at 10 MB. |
-| `analyze-patterns.md` | **Skill** — reads the accumulated logs, groups by session, detects commands/sequences/workflows appearing in 3+ sessions, and generates reusable skill files. |
+| `log-operations.py` | **PostToolUse hook** — silently appends a JSON summary after every tool call. Auto-rotates at 10 MB. |
+| `pre-analyze.py` | **Python script** — crunches raw logs into structured summaries. ~80% token savings vs reading raw JSONL. |
+| `analyze-patterns` | **Skill** — reads the pre-analyzed summary, detects patterns across 3+ sessions, generates reusable skill files. |
 
 ## Quick Start
 
@@ -62,21 +63,25 @@ That's it. Use Claude Code normally for a few sessions, then run:
 
 ## What Gets Logged
 
-Each tool call produces one compact JSONL entry (~100 bytes):
+Each tool call produces one compact JSONL entry:
 
 ```json
 {
+  "ver": 2,
   "ts": "2026-03-02T09:50:10Z",
   "sid": "e0af7856-2df8-48",
   "tool": "Bash",
   "input": {"command": "npm test", "description": "Run tests"},
-  "cwd": "/home/user/my-project"
+  "cwd": "/home/user/my-project",
+  "tuid": "toolu_01ABcDeF12",
+  "res": {"success": true, "exit_code": 0}
 }
 ```
 
 | Feature | Detail |
 |---------|--------|
-| **Truncation** | Strings over 300 chars are trimmed (head 200 + tail 50) |
+| **Format** | v2 — includes tool response summary (`res`) and tool use ID (`tuid`) |
+| **Truncation** | Strings over 300 chars trimmed, responses summarized to 500 chars |
 | **Rotation** | Auto-rotates at 10 MB, keeping the newer half |
 | **Location** | `~/.claude/tool_logs/operations.jsonl` |
 
@@ -84,39 +89,31 @@ Each tool call produces one compact JSONL entry (~100 bytes):
 
 | Step | Description |
 |------|-------------|
-| **1. Statistics** | Total records, session count, tool frequency top 5, most common commands and directories |
-| **2. Pattern detection** | Finds repeated commands, sequences (2–5 steps), and workflow patterns across 3+ sessions |
-| **3. Suggestions** | For each pattern: name, frequency, steps, parameterizable parts, and a ready-to-use `.md` skill |
-| **4. Creation** | You choose which to save → written to `~/.claude/commands/` → immediately available |
+| **1. Pre-analyze** | Python script crunches logs into statistics + patterns (~10 KB summary) |
+| **2. Statistics** | Total records, session count, tool frequency top 5, most common commands and directories |
+| **3. Pattern detection** | Finds repeated commands, sequences (2–3 steps), and workflow patterns across 3+ sessions |
+| **4. Suggestions** | For each pattern: name, frequency, steps, parameterizable parts, and a ready-to-use `.md` skill |
+| **5. Creation** | You choose which to save → written to `~/.claude/commands/` → immediately available |
 
 ## Example Output
 
-Here's what `/analyze-patterns` produces after ~10 sessions:
-
 ```
-=== Statistics ===
-Total records: 853 | Sessions: 12 | Time span: 7 days
-Tool frequency: Bash (321), Read (253), Edit (124), Write (39), Glob (23)
+=== Pre-analysis Summary ===
+Records: 853 | Sessions: 12 | Span: 7d
+Tool Frequency: Bash (321, 38%), Read (253, 30%), Edit (124, 15%)
+Existing Skills: restart-dashboard, dashboard-logs
 
-=== Existing Skills ===
-Found 2 skills in ~/.claude/commands/:
-  - restart-dashboard.md (kill → start → verify dashboard)
-  - dashboard-logs.md (view logs with keyword filter)
-
-=== Pattern: Dev Server Restart ===
-- Overlap: Fully covered by restart-dashboard.md
-- Recommendation: Skip (already exists)
-- Frequency: appeared in 5 sessions
+Detected Patterns:
+  Repeated: `ssh kubao "cd /opt/X && ..."` — 5 sessions
+  Sequence: Edit(config) → Bash(cargo build) → Bash(deploy) — 4 sessions
 
 === Pattern: Deploy to Production ===
 - Overlap: None
 - Recommendation: Create new skill
-- Frequency: appeared in 4 sessions
-- Typical steps: rsync → ssh restart service → tail logs
-- Suggested skill: deploy-prod.md
+- Frequency: 4 sessions
+- Steps: rsync → ssh restart → tail logs
 
-Which patterns would you like to save as skills? (comma-separated numbers)
-> 2
+Which patterns to save? > 1
 
 ✓ Created ~/.claude/commands/deploy-prod.md
   Invoke with: /deploy-prod
@@ -127,22 +124,17 @@ Which patterns would you like to save as skills? (comma-separated numbers)
 <details>
 <summary>Click to expand manual steps</summary>
 
-### 1. Copy the hook
+### 1. Copy files
 
 ```bash
-mkdir -p ~/.claude/hooks
+mkdir -p ~/.claude/{hooks,scripts,skills/analyze-patterns}
 cp hooks/log-operations.py ~/.claude/hooks/
-chmod +x ~/.claude/hooks/log-operations.py
+cp scripts/pre-analyze.py ~/.claude/scripts/
+cp skills/analyze-patterns/SKILL.md ~/.claude/skills/analyze-patterns/
+chmod +x ~/.claude/hooks/log-operations.py ~/.claude/scripts/pre-analyze.py
 ```
 
-### 2. Copy the skill
-
-```bash
-mkdir -p ~/.claude/commands
-cp commands/analyze-patterns.md ~/.claude/commands/
-```
-
-### 3. Register the hook
+### 2. Register the hook
 
 Add this to your `~/.claude/settings.json`:
 
@@ -174,12 +166,17 @@ Add this to your `~/.claude/settings.json`:
 ```
 ~/.claude/
 ├── hooks/
-│   └── log-operations.py      # PostToolUse hook (data collection)
+│   └── log-operations.py       # PostToolUse hook (v2 format)
+├── scripts/
+│   └── pre-analyze.py          # Log pre-analyzer
+├── skills/
+│   └── analyze-patterns/
+│       └── SKILL.md            # /analyze-patterns skill
 ├── commands/
-│   └── analyze-patterns.md    # /analyze-patterns skill
+│   └── analyze-patterns.md     # Legacy skill (backward compat)
 ├── tool_logs/
-│   └── operations.jsonl       # Auto-generated log (created on first use)
-└── settings.json              # Hook registration
+│   └── operations.jsonl        # Auto-generated log
+└── settings.json               # Hook registration
 ```
 
 ## FAQ
@@ -199,7 +196,7 @@ The log auto-rotates at 10 MB. Typical usage produces roughly 1 MB per week.
 <details>
 <summary><strong>Does it capture sensitive data?</strong></summary>
 
-File contents and diffs are truncated to 300 characters. The log records tool names, commands, and file paths. You can review `~/.claude/tool_logs/operations.jsonl` at any time.
+File contents and diffs are truncated to 300 characters. Tool responses are summarized to 500 characters (key fields only). You can review `~/.claude/tool_logs/operations.jsonl` at any time.
 </details>
 
 <details>
@@ -217,7 +214,7 @@ Yes. Change the `matcher` field in `settings.json`. For example, `"matcher": "Ba
 <details>
 <summary><strong>How do I uninstall?</strong></summary>
 
-Run `./uninstall.sh`, or manually remove `~/.claude/hooks/log-operations.py`, `~/.claude/commands/analyze-patterns.md`, and the `PostToolUse` hook entry from `~/.claude/settings.json`.
+Run `./uninstall.sh`. It removes all components while preserving your other settings.
 </details>
 
 ## Requirements

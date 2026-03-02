@@ -30,21 +30,22 @@
  积累几次会话后，运行 /analyze-patterns
           │
           ▼
- Claude 分析日志，识别跨会话的重复多步工作流
+ Python 预分析器压缩日志 → Claude 读取摘要（而非原始日志）
           │
           ▼
  你选择要保存的模式，生成对应的 /skills
           │
           ▼
- 新 Skills 写入 ~/.claude/commands/，即装即用
+ 新 Skills 写入 ~/.claude/，即装即用
 ```
 
-**两个组件，零配置负担：**
+**三个组件，零配置负担：**
 
 | 组件 | 功能 |
 |------|------|
-| `log-operations.py` | **PostToolUse Hook** — 每次工具调用后静默追加一行 JSON 摘要。自动截断大字段，10 MB 自动轮转。 |
-| `analyze-patterns.md` | **Skill** — 读取累积的日志，按会话分组，检测在 3+ 个会话中出现的命令/序列/工作流，生成可复用的技能文件。 |
+| `log-operations.py` | **PostToolUse Hook** — 每次工具调用后静默追加一行 JSON 摘要。10 MB 自动轮转。 |
+| `pre-analyze.py` | **Python 脚本** — 将原始日志压缩为结构化摘要。相比直接读 JSONL 节省约 80% token。 |
+| `analyze-patterns` | **Skill** — 读取预分析摘要，检测在 3+ 个会话中出现的命令/序列/工作流，生成可复用的技能文件。 |
 
 ## 快速开始
 
@@ -62,21 +63,25 @@ cd claude-recall
 
 ## 日志记录内容
 
-每次工具调用生成一条紧凑的 JSONL 记录（约 100 字节）：
+每次工具调用生成一条紧凑的 JSONL 记录：
 
 ```json
 {
+  "ver": 2,
   "ts": "2026-03-02T09:50:10Z",
   "sid": "e0af7856-2df8-48",
   "tool": "Bash",
   "input": {"command": "npm test", "description": "Run tests"},
-  "cwd": "/home/user/my-project"
+  "cwd": "/home/user/my-project",
+  "tuid": "toolu_01ABcDeF12",
+  "res": {"success": true, "exit_code": 0}
 }
 ```
 
 | 特性 | 说明 |
 |------|------|
-| **截断策略** | 超过 300 字符的字符串只保留首尾（头 200 + 尾 50） |
+| **格式** | v2 — 包含工具响应摘要 (`res`) 和工具调用 ID (`tuid`) |
+| **截断策略** | 超过 300 字符的字符串只保留首尾，响应摘要最多 500 字符 |
 | **自动轮转** | 日志超过 10 MB 时自动保留较新的一半 |
 | **存储位置** | `~/.claude/tool_logs/operations.jsonl` |
 
@@ -84,39 +89,31 @@ cd claude-recall
 
 | 步骤 | 说明 |
 |------|------|
-| **1. 统计概览** | 总记录数、会话数、工具使用频率 TOP 5、最常见命令和工作目录 |
-| **2. 模式检测** | 在 3+ 个会话中寻找重复命令、命令序列（2–5 步）和工作流模式 |
-| **3. 建议生成** | 对每个模式给出：名称、出现频率、具体步骤、可参数化部分、现成的 `.md` 技能文件 |
-| **4. 一键创建** | 你选择要保存的模式 → 写入 `~/.claude/commands/` → 马上可用 |
+| **1. 预分析** | Python 脚本将日志压缩为统计数据 + 模式（约 10 KB 摘要） |
+| **2. 统计概览** | 总记录数、会话数、工具使用频率 TOP 5、最常见命令和工作目录 |
+| **3. 模式检测** | 在 3+ 个会话中寻找重复命令、命令序列（2–3 步）和工作流模式 |
+| **4. 建议生成** | 对每个模式给出：名称、出现频率、具体步骤、可参数化部分、现成的 `.md` 技能文件 |
+| **5. 一键创建** | 你选择要保存的模式 → 写入 `~/.claude/commands/` → 马上可用 |
 
 ## 输出示例
 
-以下是使用约 10 个会话后运行 `/analyze-patterns` 的真实输出：
-
 ```
-=== 统计概览 ===
-总记录: 853 | 会话数: 12 | 时间跨度: 7 天
-工具频率: Bash (321), Read (253), Edit (124), Write (39), Glob (23)
+=== 预分析摘要 ===
+记录: 853 | 会话: 12 | 跨度: 7 天
+工具频率: Bash (321, 38%), Read (253, 30%), Edit (124, 15%)
+已有技能: restart-dashboard, dashboard-logs
 
-=== 已有技能 ===
-在 ~/.claude/commands/ 中发现 2 个技能:
-  - restart-dashboard.md (杀进程 → 启动 → 验证 dashboard)
-  - dashboard-logs.md (查看日志，支持关键词过滤)
-
-=== 模式: 重启开发服务器 ===
-- 重叠度: 已被 restart-dashboard.md 完全覆盖
-- 建议操作: 跳过（已存在）
-- 频率: 出现在 5 个会话中
+检测到的模式:
+  重复命令: `ssh kubao "cd /opt/X && ..."` — 5 个会话
+  命令序列: Edit(config) → Bash(cargo build) → Bash(deploy) — 4 个会话
 
 === 模式: 部署到生产环境 ===
 - 重叠度: 无
 - 建议操作: 创建新技能
-- 频率: 出现在 4 个会话中
-- 典型步骤: rsync → ssh 重启服务 → tail 查看日志
-- 建议文件名: deploy-prod.md
+- 频率: 4 个会话
+- 步骤: rsync → ssh 重启服务 → tail 查看日志
 
-要保存哪些模式为 skill？（输入序号，逗号分隔）
-> 2
+要保存哪些模式？> 1
 
 ✓ 已创建 ~/.claude/commands/deploy-prod.md
   调用方式: /deploy-prod
@@ -127,22 +124,17 @@ cd claude-recall
 <details>
 <summary>点击展开手动安装步骤</summary>
 
-### 1. 复制 Hook 脚本
+### 1. 复制文件
 
 ```bash
-mkdir -p ~/.claude/hooks
+mkdir -p ~/.claude/{hooks,scripts,skills/analyze-patterns}
 cp hooks/log-operations.py ~/.claude/hooks/
-chmod +x ~/.claude/hooks/log-operations.py
+cp scripts/pre-analyze.py ~/.claude/scripts/
+cp skills/analyze-patterns/SKILL.md ~/.claude/skills/analyze-patterns/
+chmod +x ~/.claude/hooks/log-operations.py ~/.claude/scripts/pre-analyze.py
 ```
 
-### 2. 复制 Skill
-
-```bash
-mkdir -p ~/.claude/commands
-cp commands/analyze-patterns.md ~/.claude/commands/
-```
-
-### 3. 注册 Hook
+### 2. 注册 Hook
 
 在 `~/.claude/settings.json` 中添加：
 
@@ -174,12 +166,17 @@ cp commands/analyze-patterns.md ~/.claude/commands/
 ```
 ~/.claude/
 ├── hooks/
-│   └── log-operations.py      # PostToolUse Hook（数据采集）
+│   └── log-operations.py       # PostToolUse Hook（v2 格式）
+├── scripts/
+│   └── pre-analyze.py          # 日志预分析器
+├── skills/
+│   └── analyze-patterns/
+│       └── SKILL.md            # /analyze-patterns skill
 ├── commands/
-│   └── analyze-patterns.md    # /analyze-patterns skill
+│   └── analyze-patterns.md     # 旧版 skill（向后兼容）
 ├── tool_logs/
-│   └── operations.jsonl       # 自动生成的日志（首次使用时创建）
-└── settings.json              # Hook 注册配置
+│   └── operations.jsonl        # 自动生成的日志
+└── settings.json               # Hook 注册配置
 ```
 
 ## 常见问题
@@ -199,7 +196,7 @@ cp commands/analyze-patterns.md ~/.claude/commands/
 <details>
 <summary><strong>会记录敏感数据吗？</strong></summary>
 
-文件内容和 diff 会被截断到 300 字符。日志只记录工具名称、命令和文件路径。你可以随时查看 `~/.claude/tool_logs/operations.jsonl` 确认。
+文件内容和 diff 截断到 300 字符，工具响应摘要最多 500 字符（仅关键字段）。可以随时查看日志确认。
 </details>
 
 <details>
@@ -217,7 +214,7 @@ cp commands/analyze-patterns.md ~/.claude/commands/
 <details>
 <summary><strong>如何卸载？</strong></summary>
 
-运行 `./uninstall.sh`，或手动删除 `~/.claude/hooks/log-operations.py` 和 `~/.claude/commands/analyze-patterns.md`，再从 `~/.claude/settings.json` 中移除 `PostToolUse` Hook 条目即可。
+运行 `./uninstall.sh`，移除所有组件，保留你的其他设置。
 </details>
 
 ## 环境要求

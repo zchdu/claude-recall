@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-03-02
+
+### Added
+- **v2 log format** (`log-operations.py`): Three new fields — `ver` (version), `tuid` (tool use ID), `res` (tool response summary). Fully backward-compatible with v1 entries.
+- **Python pre-analysis engine** (`scripts/pre-analyze.py`): Crunches raw JSONL logs into a structured ~10 KB summary before Claude reads them. ~80% token savings vs raw JSONL analysis.
+- **Skills format** (`skills/analyze-patterns/SKILL.md`): Migrated to the new `skills/` directory format with `!`command`` injection to feed pre-analyzed data directly into the skill.
+
+### Changed
+- `/analyze-patterns` now uses pre-analyzed data instead of reading raw JSONL — faster, cheaper, more reliable
+- `install.sh`: Now installs hook + pre-analyzer script + skill (new format) + legacy command
+- `uninstall.sh`: Now cleans up all components including scripts and skills directories
+
+### Deprecated
+- `commands/analyze-patterns.md`: Kept for backward compatibility but superseded by `skills/analyze-patterns/SKILL.md`
+
 ## [1.1.0] - 2026-03-02
 
 ### Added

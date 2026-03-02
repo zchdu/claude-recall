@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh - Install Claude Recall
-# Copies hook script, skill, and registers the PostToolUse hook.
+# Copies hook, pre-analyzer, skill, and registers the PostToolUse hook.
 # Supports macOS and Linux. Requires Python 3.8+.
 set -euo pipefail
 
@@ -30,13 +30,14 @@ Usage: $0 [OPTIONS]
 
 Options:
   -h, --help    Show this help message and exit
-  -f, --force   Overwrite existing files (hook, command) without prompting
+  -f, --force   Overwrite existing files without prompting
 
 What it does:
   1. Copies hooks/log-operations.py to ~/.claude/hooks/
-  2. Copies commands/analyze-patterns.md to ~/.claude/commands/
-  3. Registers the PostToolUse hook in ~/.claude/settings.json
-     (safely merges with existing hooks if present)
+  2. Copies scripts/pre-analyze.py to ~/.claude/scripts/
+  3. Copies skills/analyze-patterns/SKILL.md to ~/.claude/skills/analyze-patterns/
+  4. Copies commands/analyze-patterns.md to ~/.claude/commands/ (legacy)
+  5. Registers the PostToolUse hook in ~/.claude/settings.json
 
 Requirements:
   - Python 3.8+
@@ -63,6 +64,8 @@ done
 CLAUDE_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 COMMANDS_DIR="$CLAUDE_DIR/commands"
+SKILLS_DIR="$CLAUDE_DIR/skills"
+SCRIPTS_DIR="$CLAUDE_DIR/scripts"
 SETTINGS="$CLAUDE_DIR/settings.json"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -95,57 +98,63 @@ else
     mkdir -p "$CLAUDE_DIR"
 fi
 
-# --- 1. Install hook ---
-mkdir -p "$HOOKS_DIR"
-SRC_HOOK="$SCRIPT_DIR/hooks/log-operations.py"
-DST_HOOK="$HOOKS_DIR/log-operations.py"
+# --- Helper: install a file ---
+install_file() {
+    local src="$1"
+    local dst="$2"
+    local label="$3"
 
-if [ ! -f "$SRC_HOOK" ]; then
-    err "Source hook not found: $SRC_HOOK"
-    exit 1
-fi
+    if [ ! -f "$src" ]; then
+        err "Source not found: $src"
+        return 1
+    fi
 
-if [ -f "$DST_HOOK" ] && [ "$FORCE" -eq 0 ]; then
-    # Check if content is identical
-    if python3 -c "
+    mkdir -p "$(dirname "$dst")"
+
+    if [ -f "$dst" ] && [ "$FORCE" -eq 0 ]; then
+        if python3 -c "
 import hashlib, sys
 def h(p):
     with open(p,'rb') as f: return hashlib.sha256(f.read()).hexdigest()
-sys.exit(0 if h('$SRC_HOOK') == h('$DST_HOOK') else 1)
+sys.exit(0 if h('$src') == h('$dst') else 1)
 " 2>/dev/null; then
-        skip "Hook already installed (identical): $DST_HOOK"
-    else
-        info "Hook exists but differs. Updating: $DST_HOOK"
-        cp "$SRC_HOOK" "$DST_HOOK"
-        chmod +x "$DST_HOOK"
-        ok "Hook updated: $DST_HOOK"
+            skip "$label already installed (identical): $dst"
+            return 0
+        else
+            info "$label exists but differs. Updating: $dst"
+        fi
     fi
-else
-    cp "$SRC_HOOK" "$DST_HOOK"
-    chmod +x "$DST_HOOK"
-    ok "Hook installed: $DST_HOOK"
-fi
 
-# --- 2. Install skill ---
+    cp "$src" "$dst"
+    chmod +x "$dst"
+    ok "$label installed: $dst"
+}
+
+# --- 1. Install hook ---
+install_file "$SCRIPT_DIR/hooks/log-operations.py" "$HOOKS_DIR/log-operations.py" "Hook"
+
+# --- 2. Install pre-analyzer ---
+install_file "$SCRIPT_DIR/scripts/pre-analyze.py" "$SCRIPTS_DIR/pre-analyze.py" "Pre-analyzer"
+
+# --- 3. Install skill (new format) ---
+install_file "$SCRIPT_DIR/skills/analyze-patterns/SKILL.md" "$SKILLS_DIR/analyze-patterns/SKILL.md" "Skill (analyze-patterns)"
+
+# --- 4. Install legacy command ---
 mkdir -p "$COMMANDS_DIR"
 SRC_CMD="$SCRIPT_DIR/commands/analyze-patterns.md"
 DST_CMD="$COMMANDS_DIR/analyze-patterns.md"
 
-if [ ! -f "$SRC_CMD" ]; then
-    err "Source command not found: $SRC_CMD"
-    exit 1
+if [ -f "$SRC_CMD" ]; then
+    if [ -f "$DST_CMD" ] && [ "$FORCE" -eq 0 ]; then
+        skip "Legacy command already exists: $DST_CMD"
+    else
+        cp "$SRC_CMD" "$DST_CMD"
+        ok "Legacy command installed: $DST_CMD"
+    fi
 fi
 
-if [ -f "$DST_CMD" ] && [ "$FORCE" -eq 0 ]; then
-    skip "Command already exists: $DST_CMD"
-else
-    cp "$SRC_CMD" "$DST_CMD"
-    ok "Command installed: $DST_CMD"
-fi
-
-# --- 3. Register hook in settings.json ---
+# --- 5. Register hook in settings.json ---
 if [ ! -f "$SETTINGS" ]; then
-    # No settings file: create fresh
     cat > "$SETTINGS" << 'JSON'
 {
   "hooks": {
@@ -166,7 +175,6 @@ if [ ! -f "$SETTINGS" ]; then
 JSON
     ok "Created $SETTINGS with hook config"
 else
-    # Settings file exists - use Python to safely merge
     MERGE_RESULT="$(python3 -c "
 import json, sys
 
@@ -190,18 +198,15 @@ except (json.JSONDecodeError, FileNotFoundError):
     print('CORRUPT')
     sys.exit(0)
 
-# Check if hook is already registered
 if hook_marker in json.dumps(data):
     print('EXISTS')
     sys.exit(0)
 
-# Ensure hooks structure exists
 if 'hooks' not in data:
     data['hooks'] = {}
 if 'PostToolUse' not in data['hooks']:
     data['hooks']['PostToolUse'] = []
 
-# Append our hook entry
 data['hooks']['PostToolUse'].append(hook_entry)
 
 with open(settings_path, 'w') as f:
