@@ -14,7 +14,16 @@ Provide basic statistics:
 - Top 10 most frequent Bash commands (extract `input.command` field)
 - Top 5 working directories (`cwd` field)
 
-### 3. Pattern detection
+### 3. Scan existing skills
+
+Before detecting patterns, read all `.md` files in `~/.claude/commands/` to understand what skills already exist. For each file, note:
+- Filename (skill name)
+- What it does (purpose/workflow)
+- Key operations it covers (e.g., specific commands, services, hosts)
+
+Keep this inventory in memory for comparison in the next steps.
+
+### 4. Pattern detection
 
 Group by `sid` (session ID) and look for these repeated patterns across different sessions:
 
@@ -36,34 +45,42 @@ Group by `sid` (session ID) and look for these repeated patterns across differen
 - Isolated exploratory operations (standalone Read, Glob, Grep)
 - Operations from the current analysis session itself
 
-### 4. Output suggestions
+### 5. Output suggestions
 
-For each identified pattern, output:
+For each identified pattern, **first compare it against the existing skills inventory from Step 3**:
+
+- **Already covered**: If an existing skill already handles this exact pattern (same operations, same targets), skip it entirely — do not suggest it
+- **Partially overlapping**: If an existing skill covers similar operations but differs in scope or target (e.g., existing skill deploys service A, new pattern deploys service B with same steps), suggest **updating the existing skill** to be more generic/parameterized rather than creating a new one. Show the diff or proposed changes to the existing skill
+- **New pattern**: If no existing skill covers this pattern, suggest creating a new skill
+
+For each suggestion, output:
 
 ```
 ### Pattern: <pattern name>
+- **Overlap**: [None / Partial overlap with `<existing-skill>.md` / Fully covered by `<existing-skill>.md`]
+- **Recommendation**: [Create new skill / Update existing `<skill>.md` / Skip (already exists)]
 - **Frequency**: appeared in N sessions
 - **Typical steps**: describe specific steps
 - **Parameterizable**: which parts change each time, can be replaced with $ARGUMENTS
 - **Suggested skill filename**: <name>.md
 - **Suggested skill content**:
-(show complete .md file content)
+(show complete .md file content, or show proposed changes to existing skill)
 ```
 
-### 5. Create skills
+### 6. Create skills
 
-After showing all suggestions, ask the user which ones to create. Once confirmed:
-- Write `.md` files to `~/.claude/commands/`
+After showing all suggestions, ask the user which ones to create or update. Once confirmed:
+- For new skills: write `.md` files to `~/.claude/commands/`
+- For updates to existing skills: modify the existing `.md` file
 - Inform the user they can invoke them via `/<skill-name>`
 
-### 6. Log maintenance
+### 7. Log maintenance
 
-If the log exceeds 5000 lines, suggest cleanup (keep most recent 3000 lines). Execute cleanup after user confirms.
+If the log exceeds 50000 lines, suggest cleanup (keep most recent 30000 lines). Execute cleanup after user confirms.
 
 ## Notes
 
 - Generated skills use `$ARGUMENTS` for user-provided arguments
 - Skill content should be clear instructions for Claude, not shell scripts
 - Prioritize high-value patterns (operations that save the most time when automated)
-- If a skill with the same name already exists in `~/.claude/commands/`, warn the user to avoid overwriting
 - If no patterns are found, explain possible reasons (too few sessions, highly varied work, etc.) and suggest continuing to use Claude Code for more sessions before re-running
