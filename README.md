@@ -89,6 +89,39 @@ Each tool call produces one compact JSONL entry (~100 bytes):
 | **3. Suggestions** | For each pattern: name, frequency, steps, parameterizable parts, and a ready-to-use `.md` skill |
 | **4. Creation** | You choose which to save → written to `~/.claude/commands/` → immediately available |
 
+## Example Output
+
+Here's what `/analyze-patterns` produces after ~10 sessions:
+
+```
+=== Statistics ===
+Total records: 853 | Sessions: 12 | Time span: 7 days
+Tool frequency: Bash (321), Read (253), Edit (124), Write (39), Glob (23)
+
+=== Existing Skills ===
+Found 2 skills in ~/.claude/commands/:
+  - restart-dashboard.md (kill → start → verify dashboard)
+  - dashboard-logs.md (view logs with keyword filter)
+
+=== Pattern: Dev Server Restart ===
+- Overlap: Fully covered by restart-dashboard.md
+- Recommendation: Skip (already exists)
+- Frequency: appeared in 5 sessions
+
+=== Pattern: Deploy to Production ===
+- Overlap: None
+- Recommendation: Create new skill
+- Frequency: appeared in 4 sessions
+- Typical steps: rsync → ssh restart service → tail logs
+- Suggested skill: deploy-prod.md
+
+Which patterns would you like to save as skills? (comma-separated numbers)
+> 2
+
+✓ Created ~/.claude/commands/deploy-prod.md
+  Invoke with: /deploy-prod
+```
+
 ## Manual Installation
 
 <details>

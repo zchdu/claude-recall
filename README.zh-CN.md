@@ -89,6 +89,39 @@ cd claude-recall
 | **3. 建议生成** | 对每个模式给出：名称、出现频率、具体步骤、可参数化部分、现成的 `.md` 技能文件 |
 | **4. 一键创建** | 你选择要保存的模式 → 写入 `~/.claude/commands/` → 马上可用 |
 
+## 输出示例
+
+以下是使用约 10 个会话后运行 `/analyze-patterns` 的真实输出：
+
+```
+=== 统计概览 ===
+总记录: 853 | 会话数: 12 | 时间跨度: 7 天
+工具频率: Bash (321), Read (253), Edit (124), Write (39), Glob (23)
+
+=== 已有技能 ===
+在 ~/.claude/commands/ 中发现 2 个技能:
+  - restart-dashboard.md (杀进程 → 启动 → 验证 dashboard)
+  - dashboard-logs.md (查看日志，支持关键词过滤)
+
+=== 模式: 重启开发服务器 ===
+- 重叠度: 已被 restart-dashboard.md 完全覆盖
+- 建议操作: 跳过（已存在）
+- 频率: 出现在 5 个会话中
+
+=== 模式: 部署到生产环境 ===
+- 重叠度: 无
+- 建议操作: 创建新技能
+- 频率: 出现在 4 个会话中
+- 典型步骤: rsync → ssh 重启服务 → tail 查看日志
+- 建议文件名: deploy-prod.md
+
+要保存哪些模式为 skill？（输入序号，逗号分隔）
+> 2
+
+✓ 已创建 ~/.claude/commands/deploy-prod.md
+  调用方式: /deploy-prod
+```
+
 ## 手动安装
 
 <details>
