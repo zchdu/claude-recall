@@ -26,3 +26,6 @@ Desktop.ini
 
 # Tool logs (generated at runtime)
 tool_logs/
+
+# Promo drafts (not for public repo)
+promo-drafts.md
