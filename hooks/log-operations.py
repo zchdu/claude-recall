@@ -25,6 +25,7 @@ partial truncation.
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 LOG_DIR = os.path.expanduser("~/.claude/tool_logs")
@@ -34,7 +35,8 @@ MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_STR_LEN = 300
 MAX_RES_LEN = 500
 
-# fcntl is only available on Unix; fall back to no-op on Windows.
+# fcntl is only available on Unix; fall back to msvcrt on Windows.
+_HAS_REAL_LOCK = False
 try:
     import fcntl
 
@@ -43,12 +45,25 @@ try:
 
     def _unlock(f):
         fcntl.flock(f, fcntl.LOCK_UN)
-except ImportError:
-    def _lock(f):
-        pass
 
-    def _unlock(f):
-        pass
+    _HAS_REAL_LOCK = True
+except ImportError:
+    try:
+        import msvcrt
+
+        def _lock(f):
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+        def _unlock(f):
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+        _HAS_REAL_LOCK = True
+    except ImportError:
+        def _lock(f):
+            pass
+
+        def _unlock(f):
+            pass
 
 
 def truncate_value(v):
@@ -57,8 +72,11 @@ def truncate_value(v):
         return v[:200] + f" ...({len(v)} chars)... " + v[-50:]
     if isinstance(v, dict):
         return {k: truncate_value(val) for k, val in v.items()}
-    if isinstance(v, list) and len(v) > 20:
-        return v[:10] + [f"...({len(v)} items)"]
+    if isinstance(v, list):
+        items = [truncate_value(item) for item in (v[:10] if len(v) > 20 else v)]
+        if len(v) > 20:
+            items.append(f"...({len(v)} items)")
+        return items
     return v
 
 
@@ -114,17 +132,41 @@ def _summarize_response(tool_response):
     return summary
 
 
+MAX_SIZE_HARD = 50 * 1024 * 1024  # 50 MB hard cap for no-lock mode
+
+
 def maybe_rotate():
     """If log exceeds MAX_SIZE, keep the newer half.
 
     Caller must already hold the lock file.
+    Without real locking, only stops writing at a hard cap to prevent unbounded growth.
     """
+    if not _HAS_REAL_LOCK:
+        # Best-effort: stop appending if log exceeds hard cap
+        try:
+            if os.path.getsize(LOG_PATH) > MAX_SIZE_HARD:
+                return "SKIP_WRITE"
+        except OSError:
+            pass
+        return None
     try:
         if os.path.getsize(LOG_PATH) > MAX_SIZE:
-            with open(LOG_PATH, "r") as f:
+            with open(LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
-            with open(LOG_PATH, "w") as f:
-                f.writelines(lines[len(lines) // 2 :])
+            kept = lines[len(lines) // 2 :]
+            fd, tmp = tempfile.mkstemp(dir=LOG_DIR, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as tf:
+                    tf.writelines(kept)
+                    tf.flush()
+                    os.fsync(tf.fileno())
+                os.replace(tmp, LOG_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
     except OSError:
         pass
 
@@ -146,7 +188,17 @@ def _main_inner():
     if not isinstance(data, dict):
         return
 
-    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(LOG_DIR, mode=0o700, exist_ok=True)
+    # Enforce permissions on existing directories/files
+    try:
+        os.chmod(LOG_DIR, 0o700)
+    except OSError:
+        pass
+    if os.path.exists(LOG_PATH):
+        try:
+            os.chmod(LOG_PATH, 0o600)
+        except OSError:
+            pass
 
     tool_input = data.get("tool_input", {})
     if not isinstance(tool_input, dict):
@@ -182,11 +234,16 @@ def _main_inner():
     line = json.dumps(entry, ensure_ascii=False) + "\n"
 
     # Use an advisory file lock to serialise concurrent writers.
-    lock_fd = open(LOCK_PATH, "w")
+    # Open lock file with restricted permissions
+    lock_fd_raw = os.open(LOCK_PATH, os.O_WRONLY | os.O_CREAT, 0o600)
+    lock_fd = os.fdopen(lock_fd_raw, "w")
     try:
         _lock(lock_fd)
-        maybe_rotate()
-        with open(LOG_PATH, "a") as f:
+        if maybe_rotate() == "SKIP_WRITE":
+            return
+        # Open log file with restricted permissions on creation
+        log_fd = os.open(LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(log_fd, "a", encoding="utf-8", errors="replace") as f:
             f.write(line)
     finally:
         _unlock(lock_fd)

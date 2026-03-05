@@ -112,12 +112,13 @@ install_file() {
     mkdir -p "$(dirname "$dst")"
 
     if [ -f "$dst" ] && [ "$FORCE" -eq 0 ]; then
-        if python3 -c "
+        if python3 - "$src" "$dst" <<'PY' 2>/dev/null
 import hashlib, sys
 def h(p):
-    with open(p,'rb') as f: return hashlib.sha256(f.read()).hexdigest()
-sys.exit(0 if h('$src') == h('$dst') else 1)
-" 2>/dev/null; then
+    with open(p, 'rb') as f: return hashlib.sha256(f.read()).hexdigest()
+sys.exit(0 if h(sys.argv[1]) == h(sys.argv[2]) else 1)
+PY
+        then
             skip "$label already installed (identical): $dst"
             return 0
         else
@@ -168,17 +169,17 @@ if [ ! -f "$SETTINGS" ]; then
 JSON
     ok "Created $SETTINGS with hook config"
 else
-    MERGE_RESULT="$(python3 -c "
+    MERGE_RESULT="$(python3 - "$SETTINGS" <<'PY' 2>&1
 import json, sys
 
-settings_path = '$SETTINGS'
+settings_path = sys.argv[1]
 hook_marker = 'log-operations'
 hook_entry = {
     'matcher': '',
     'hooks': [
         {
             'type': 'command',
-            'command': 'python3 \$HOME/.claude/hooks/log-operations.py',
+            'command': 'python3 $HOME/.claude/hooks/log-operations.py',
             'timeout': 5
         }
     ]
@@ -207,7 +208,8 @@ with open(settings_path, 'w') as f:
     f.write('\n')
 
 print('MERGED')
-" 2>&1)" || true
+PY
+)" || true
 
     case "$MERGE_RESULT" in
         EXISTS)

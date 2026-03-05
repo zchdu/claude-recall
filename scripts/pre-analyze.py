@@ -26,7 +26,11 @@ SKILLS_DIR = Path.home() / ".claude" / "skills"
 def parse_ts(ts_str):
     try:
         ts_str = ts_str.rstrip("Z") + "+00:00" if ts_str.endswith("Z") else ts_str
-        return datetime.fromisoformat(ts_str)
+        dt = datetime.fromisoformat(ts_str)
+        # Normalize naive timestamps to UTC to avoid comparison errors
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     except (ValueError, AttributeError):
         return None
 
@@ -36,9 +40,14 @@ def cutoff_ts(days):
 
 
 def stream_jsonl(path, min_ts=None):
-    if not path.exists():
+    # Normalize min_ts to timezone-aware UTC
+    if min_ts is not None and hasattr(min_ts, 'tzinfo') and min_ts.tzinfo is None:
+        min_ts = min_ts.replace(tzinfo=timezone.utc)
+    try:
+        f = open(path, "r", encoding="utf-8", errors="replace")
+    except OSError:
         return
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with f:
         for line in f:
             line = line.strip()
             if not line:
@@ -51,7 +60,7 @@ def stream_jsonl(path, min_ts=None):
                 continue
             if min_ts:
                 ts = parse_ts(obj.get("ts", ""))
-                if ts and ts < min_ts:
+                if not ts or ts < min_ts:
                     continue
             yield obj
 
@@ -77,8 +86,12 @@ def scan_skills():
     ]:
         if not d.exists():
             continue
+        try:
+            entries = list(d.iterdir())
+        except OSError:
+            continue
         if stype == "command":
-            for f in d.iterdir():
+            for f in entries:
                 if f.suffix == ".md" and f.is_file():
                     try:
                         content = f.read_text(encoding="utf-8", errors="replace")[:500]
@@ -91,18 +104,18 @@ def scan_skills():
                         desc = ""
                     skills[f.stem] = desc
         else:
-            for sd in d.iterdir():
-                if sd.is_dir() and (sd / "SKILL.md").exists():
-                    try:
+            for sd in entries:
+                try:
+                    if sd.is_dir() and (sd / "SKILL.md").exists():
                         content = (sd / "SKILL.md").read_text(encoding="utf-8", errors="replace")[:500]
                         desc = next(
                             (l.strip()[:100] for l in content.split("\n")
                              if l.strip() and not l.strip().startswith(("#", "!"))),
                             "",
                         )
-                    except OSError:
-                        desc = ""
-                    skills[sd.name] = desc
+                        skills[sd.name] = desc
+                except OSError:
+                    continue
     return skills
 
 

@@ -138,10 +138,10 @@ if [ -f "$SETTINGS" ]; then
         err "Python 3 not found. Cannot safely edit $SETTINGS"
         err "Please manually remove the 'log-operations' hook entry from $SETTINGS"
     else
-        REMOVE_RESULT="$(python3 -c "
+        REMOVE_RESULT="$(python3 - "$SETTINGS" <<'PY' 2>&1
 import json, sys
 
-settings_path = '$SETTINGS'
+settings_path = sys.argv[1]
 hook_marker = 'log-operations'
 
 try:
@@ -186,7 +186,8 @@ with open(settings_path, 'w') as f:
     f.write('\n')
 
 print('REMOVED')
-" 2>&1)" || true
+PY
+)" || true
 
         case "$REMOVE_RESULT" in
             REMOVED)
