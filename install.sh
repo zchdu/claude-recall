@@ -36,7 +36,7 @@ What it does:
   1. Copies hooks/log-operations.py to ~/.claude/hooks/
   2. Copies scripts/pre-analyze.py to ~/.claude/scripts/
   3. Copies skills/analyze-patterns/SKILL.md to ~/.claude/skills/analyze-patterns/
-  4. Copies commands/analyze-patterns.md to ~/.claude/commands/ (legacy)
+  4. Removes legacy command ~/.claude/commands/analyze-patterns.md (if present)
   5. Registers the PostToolUse hook in ~/.claude/settings.json
 
 Requirements:
