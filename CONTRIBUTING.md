@@ -29,8 +29,10 @@ python3 --version
 
 ```
 hooks/log-operations.py       # PostToolUse hook (data collection)
-commands/analyze-patterns.md  # /analyze-patterns skill (English)
-commands/analyze-patterns.zh-CN.md  # /analyze-patterns skill (Chinese)
+scripts/pre-analyze.py        # Pre-analysis engine (summary + pattern extraction)
+skills/analyze-patterns/SKILL.md  # /analyze-patterns skill (current format)
+commands/analyze-patterns.md  # Legacy command (backward compatibility)
+commands/analyze-patterns.zh-CN.md  # Legacy Chinese translation
 install.sh                    # Installer
 uninstall.sh                  # Uninstaller
 ```
@@ -44,9 +46,11 @@ uninstall.sh                  # Uninstaller
    - Ensure it still works with Python 3.8+ and only uses the stdlib.
    - Verify the hook does not raise exceptions under any input (the blanket `try/except` in `main()` must remain).
    - Test manually: pipe sample JSON to stdin and confirm a valid JSONL line is appended.
-5. If you modify `analyze-patterns.md`:
-   - Keep the Chinese translation (`analyze-patterns.zh-CN.md`) in sync, or note in the PR that translation is needed.
-6. Write a clear PR description explaining **what** changed and **why**.
+5. If you modify `skills/analyze-patterns/SKILL.md`:
+   - Keep behavior aligned with the legacy command files (`commands/analyze-patterns*.md`) when relevant, or clearly note intentional divergence in the PR.
+6. If you modify any user-facing English/Chinese docs or command/skill instructions:
+   - Keep translations in sync, or note in the PR that translation follow-up is needed.
+7. Write a clear PR description explaining **what** changed and **why**.
 
 ## Coding Guidelines
 
