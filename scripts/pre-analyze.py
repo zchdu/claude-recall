@@ -23,6 +23,52 @@ COMMANDS_DIR = Path.home() / ".claude" / "commands"
 SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 
+def _strip_wrapping_quotes(value):
+    if len(value) >= 2 and (
+        (value[0] == '"' and value[-1] == '"')
+        or (value[0] == "'" and value[-1] == "'")
+    ):
+        return value[1:-1].strip()
+    return value
+
+
+def _first_content_line(content, skip_prefixes):
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(stripped.startswith(prefix) for prefix in skip_prefixes):
+            continue
+        return stripped[:100]
+    return ""
+
+
+def _extract_skill_description(content):
+    body = content
+    lines = content.splitlines()
+
+    # Parse optional YAML frontmatter and prefer `description:` there.
+    if lines and lines[0].strip() == "---":
+        end_idx = None
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                end_idx = i
+                break
+
+        if end_idx is not None:
+            frontmatter_lines = lines[1:end_idx]
+            for line in frontmatter_lines:
+                stripped = line.strip()
+                if stripped.lower().startswith("description:"):
+                    desc = stripped.split(":", 1)[1].strip()
+                    desc = _strip_wrapping_quotes(desc)
+                    if desc:
+                        return desc[:100]
+            body = "\n".join(lines[end_idx + 1:])
+
+    return _first_content_line(body, skip_prefixes=("#", "!"))
+
+
 def parse_ts(ts_str):
     try:
         ts_str = ts_str.rstrip("Z") + "+00:00" if ts_str.endswith("Z") else ts_str
@@ -95,27 +141,19 @@ def scan_skills():
                 if f.suffix == ".md" and f.is_file():
                     try:
                         content = f.read_text(encoding="utf-8", errors="replace")[:500]
-                        desc = next(
-                            (l.strip()[:100] for l in content.split("\n")
-                             if l.strip() and not l.strip().startswith("#")),
-                            "",
-                        )
+                        desc = _first_content_line(content, skip_prefixes=("#",))
                     except OSError:
                         desc = ""
                     skills[f.stem] = desc
         else:
             for sd in entries:
-                try:
-                    if sd.is_dir() and (sd / "SKILL.md").exists():
+                if sd.is_dir() and (sd / "SKILL.md").exists():
+                    try:
                         content = (sd / "SKILL.md").read_text(encoding="utf-8", errors="replace")[:500]
-                        desc = next(
-                            (l.strip()[:100] for l in content.split("\n")
-                             if l.strip() and not l.strip().startswith(("#", "!"))),
-                            "",
-                        )
-                        skills[sd.name] = desc
-                except OSError:
-                    continue
+                        desc = _extract_skill_description(content)
+                    except OSError:
+                        desc = ""
+                    skills[sd.name] = desc
     return skills
 
 
